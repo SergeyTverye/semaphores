@@ -68,6 +68,23 @@ OrdersBoard* getOrdersFromSHM(Config* config);
 Menu* getMenuFromSHM(Config* config);
 double get_elapsed_time(Config* config);
 
+// Read-Write Lock Implementation with reader priority
+// Structure for Read-Write Lock
+typedef struct ReadWriteLock {
+    pthread_mutex_t resource_mutex;  // Mutex for a resource
+    pthread_mutex_t count_mutex;     // Mutex for reader counter
+    int reader_count;                // Number of active readers
+} rwlock_t;
+
+rwlock_t menu_rwlock;
+
+void rwlock_init(rwlock_t *rw); // Read-Write Lock initialization
+void rwlock_destroy(rwlock_t *rw); // Destroying the Read-Write Lock
+void rwlock_acquire_readlock(rwlock_t *rw); // Get the read lock
+void rwlock_release_readlock(rwlock_t *rw); // Release the read lock
+void rwlock_acquire_writelock(rwlock_t *rw); // Get the write lock
+void rwlock_release_writelock(rwlock_t *rw); // Release the write lock
+
 int main(int argc, char *argv[]) {
     if (argc != 5) {
         fprintf(stderr,"Usage: %s <num_menu_items> <num_waiters> <num_customers> but receive only %d parameters\n", argv[0], argc);
@@ -84,6 +101,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr,"Invalid input parameters.\n");
         exit(EXIT_FAILURE);
     }
+
     // Output the simulation parameters
     printf("Simulation Parameters:\n");
     printf("-> Simulation time: %d\n", simulationTime);
@@ -132,6 +150,7 @@ int main(int argc, char *argv[]) {
     {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
     if (pthread_mutex_init(&mutexError, NULL)!= 0)
     {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
+    rwlock_init(&menu_rwlock); // Read-Write Mutexes initialisation
     //  Save the start of simulation time
     clock_gettime(CLOCK_MONOTONIC, &config->startTime);
     // Run threads
@@ -185,6 +204,7 @@ int main(int argc, char *argv[]) {
     if (mutexDestoyr != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(mutexDestoyr)); exit(EXIT_FAILURE);}
     mutexDestoyr = pthread_mutex_destroy(&mutexOrders);
     if (mutexDestoyr != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(mutexDestoyr)); exit(EXIT_FAILURE);}
+    rwlock_destroy(&menu_rwlock);
     // Unmap shared memory
     if (munmap(config, CONFIG_SIZE) == -1) {perror("munmap"); exit(EXIT_FAILURE);}
     if (munmap(menu, numItems * MENU_SIZE) == -1) {perror("munmap"); exit(EXIT_FAILURE);}
@@ -214,10 +234,9 @@ void* customerThreadFunction(void* arg) {
         sleep(1); // reading menu for 1 second
 
         if (orders[cust_id].done == 0) continue;
+
+        if (RAND_bytes(buffer, sizeof(buffer)) != 1) {pthread_mutex_lock(&mutexError); perror("RAND_bytes fail"); exit(EXIT_FAILURE);  pthread_mutex_unlock(&mutexError);}
         // 50% probability of ordering
-        if (RAND_bytes(buffer, sizeof(buffer)) != 1) {
-            pthread_mutex_lock(&mutexError); perror("RAND_bytes fail"); exit(EXIT_FAILURE);  pthread_mutex_unlock(&mutexError);
-        }
         if (buffer[0] % 2 && (get_elapsed_time(config) <= (double)(config->simulationTime))) {
             if (RAND_bytes(buffer, sizeof(buffer)) != 1) {
                 pthread_mutex_lock(&mutexError); perror("RAND_bytes fail"); exit(EXIT_FAILURE);  pthread_mutex_unlock(&mutexError);
@@ -227,9 +246,14 @@ void* customerThreadFunction(void* arg) {
                 orders[cust_id].amount = buffer[1] % 4 + 1; // random amount 1-4
                 orders[cust_id].done = ORDER_NOT_DONE; // set order to not done
             pthread_mutex_unlock(&mutexOrders);
+
+            rwlock_acquire_readlock(&menu_rwlock);
+                char* item = menu[orders[cust_id].itemId].name;
+            rwlock_release_readlock(&menu_rwlock);
+
             pthread_mutex_lock(&mutexOutput);
                 printf("Time: %.3f, Customer %d (TID %ld) ordered %d of %s.\n",
-                       get_elapsed_time(config), cust_id, syscall(SYS_gettid), orders[cust_id].amount, menu[orders[cust_id].itemId].name);
+                       get_elapsed_time(config), cust_id, syscall(SYS_gettid), orders[cust_id].amount, item);
             pthread_mutex_unlock(&mutexOutput);
         }
     }
@@ -258,7 +282,11 @@ void* waiterThreadFunction(void* arg) {
         pthread_mutex_lock(&mutexOrders);
             for (int j = 0; j < config->numCustomers; j++) {
                 if (orders[j].done == ORDER_NOT_DONE) {
-                    menu[orders[j].itemId].totalOrdered += orders[j].amount;
+
+                    rwlock_acquire_writelock(&menu_rwlock);
+                        menu[orders[j].itemId].totalOrdered += orders[j].amount;
+                    rwlock_release_writelock(&menu_rwlock);
+
                     orders[j].done = ORDER_DONE; // order is done
                     pthread_mutex_lock(&mutexOutput);
                         printf("Time: %.3f, Waiter %d (TID %ld) completed order for Customer %d.\n",
@@ -331,4 +359,42 @@ double get_elapsed_time(Config* config) {
     clock_gettime(CLOCK_MONOTONIC, &current_time);
     return (current_time.tv_sec - config->startTime.tv_sec) +
            (current_time.tv_nsec - config->startTime.tv_nsec) / 1e9;
+}
+
+////Write-Read Lock Implementation with Reader priotity
+void rwlock_init(rwlock_t *rw) {
+    pthread_mutex_init(&rw->resource_mutex, NULL);
+    pthread_mutex_init(&rw->count_mutex, NULL);
+    rw->reader_count = 0;
+}
+
+void rwlock_destroy(rwlock_t *rw) {
+    pthread_mutex_destroy(&rw->resource_mutex);
+    pthread_mutex_destroy(&rw->count_mutex);
+}
+
+void rwlock_acquire_readlock(rwlock_t *rw) {
+    pthread_mutex_lock(&rw->count_mutex);
+    rw->reader_count++;
+    if (rw->reader_count == 1) {
+        pthread_mutex_lock(&rw->resource_mutex);
+    }
+    pthread_mutex_unlock(&rw->count_mutex);
+}
+
+void rwlock_release_readlock(rwlock_t *rw) {
+    pthread_mutex_lock(&rw->count_mutex);
+    rw->reader_count--;
+    if (rw->reader_count == 0) {
+        pthread_mutex_unlock(&rw->resource_mutex);
+    }
+    pthread_mutex_unlock(&rw->count_mutex);
+}
+
+void rwlock_acquire_writelock(rwlock_t *rw) {
+    pthread_mutex_lock(&rw->resource_mutex);
+}
+
+void rwlock_release_writelock(rwlock_t *rw) {
+    pthread_mutex_unlock(&rw->resource_mutex);
 }
