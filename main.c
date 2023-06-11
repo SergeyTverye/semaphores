@@ -7,6 +7,7 @@
 #include <sys/syscall.h>
 #include <string.h>
 #include <errno.h>
+#include <openssl/rand.h>
 
 // Parameters
 #define MAX_ITEMS 10
@@ -17,6 +18,7 @@
 #define MAX_SLEEP_TIME_FOR_CUSTOMER 6
 #define MIN_SLEEP_TIME_FOR_WAITER 1
 #define MAX_SLEEP_TIME_FOR_WAITER 2
+#define MAX_PRICE_FOR_MENU_ITEM 100
 
 // Catalogs for shared memory
 #define SHM_NAME_MENU "/my_shm_menu"
@@ -67,7 +69,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr,"Usage: %s <num_menu_items> <num_waiters> <num_customers> but receive only %d parameters\n", argv[0], argc);
         exit(EXIT_FAILURE);
     }
-    srand(time(NULL)); // initialize the random number generator
     // Get and validate command line arguments
     int simulationTime = atoi(argv[1]); int numItems = atoi(argv[2]);
     int numCustomers = atoi(argv[3]);   int numWaiters = atoi(argv[4]);
@@ -96,10 +97,12 @@ int main(int argc, char *argv[]) {
     Menu* menu = createSharedMemory(SHM_NAME_MENU, MENU_SIZE);
     // Initialize menu
     char* potentialMenuItems[] = {"Pizza", "Salad", "Hamburger", "Spaghetti", "Pie", "Milkshake", "Banana", "Cucumber", "Orange", "Watermelon"};
+    unsigned char buffer[4];
     for (int i = 0; i < numItems; i++) {
         menu[i].id = i;
-        snprintf(menu[i].name, MAX_NAME_LEN, "%s", potentialMenuItems[i]);
-        menu[i].price = (float)(rand() % 101);
+        strncpy(menu[i].name, potentialMenuItems[i], MAX_NAME_LEN);
+        if (RAND_bytes(buffer, sizeof(buffer)) != 1) {fprintf(stderr,"Random number generation error.\n"); return 1;}
+        menu[i].price = (float)(buffer[0] % MAX_PRICE_FOR_MENU_ITEM+1);
         menu[i].totalOrdered = 0;
     }
     printf("Restaurant menu:\n");
@@ -117,10 +120,14 @@ int main(int argc, char *argv[]) {
         orders[i].done = 1; // true initially
     }
     // Mutex's initit
-    pthread_mutex_init(&mutexOutput, NULL);
-    pthread_mutex_init(&mutexMenu, NULL);
-    pthread_mutex_init(&mutexOrders, NULL);
-    pthread_mutex_init(&mutexError, NULL);
+    int MutexInit = pthread_mutex_init(&mutexOutput, NULL);
+    if (MutexInit != 0) {fprintf(stderr, "Failed to initialize mutex: %s\n", strerror(MutexInit)); exit(EXIT_FAILURE);}
+    MutexInit = pthread_mutex_init(&mutexMenu, NULL);
+    if (MutexInit != 0) {fprintf(stderr, "Failed to initialize mutex: %s\n", strerror(MutexInit)); exit(EXIT_FAILURE);}
+    MutexInit = pthread_mutex_init(&mutexOrders, NULL);
+    if (MutexInit != 0) {fprintf(stderr, "Failed to initialize mutex: %s\n", strerror(MutexInit)); exit(EXIT_FAILURE);}
+    MutexInit = pthread_mutex_init(&mutexError, NULL);
+    if (MutexInit != 0) {fprintf(stderr, "Failed to initialize mutex: %s\n", strerror(MutexInit)); exit(EXIT_FAILURE);}
     //  Save the start of simulation time
     clock_gettime(CLOCK_MONOTONIC, &config->startTime);
     // Run threads
@@ -168,17 +175,20 @@ int main(int argc, char *argv[]) {
     printf("\nTotal number of ordered items: %d\n", totalOrders);
     printf("Total income of the restaurant: %.2f shekels\n", totalIncome);
     // Destroy mutexes
-    pthread_mutex_destroy(&mutexOutput);
-    pthread_mutex_destroy(&mutexMenu);
-    pthread_mutex_destroy(&mutexOrders);
+    int mutexDestoyr = pthread_mutex_destroy(&mutexOutput);
+    if (mutexDestoyr != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(mutexDestoyr)); exit(EXIT_FAILURE);}
+    mutexDestoyr = pthread_mutex_destroy(&mutexMenu);
+    if (mutexDestoyr != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(mutexDestoyr)); exit(EXIT_FAILURE);}
+    mutexDestoyr = pthread_mutex_destroy(&mutexOrders);
+    if (mutexDestoyr != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(mutexDestoyr)); exit(EXIT_FAILURE);}
     // Unmap shared memory
-    munmap(config, CONFIG_SIZE);
-    munmap(menu, numItems * MENU_SIZE);
-    munmap(orders, numCustomers * ORDERS_BOARD_SIZE);
+    if (munmap(config, CONFIG_SIZE) == -1) {perror("munmap"); exit(EXIT_FAILURE);}
+    if (munmap(menu, numItems * MENU_SIZE) == -1) {perror("munmap"); exit(EXIT_FAILURE);}
+    if (munmap(orders, numCustomers * ORDERS_BOARD_SIZE) == -1) {perror("munmap");exit(EXIT_FAILURE);}
     // Remove shared memory objects
-    shm_unlink(SHM_NAME_CONFIG);
-    shm_unlink(SHM_NAME_MENU);
-    shm_unlink(SHM_NAME_BOARD);
+    if (shm_unlink(SHM_NAME_CONFIG) == -1) { perror("shm_unlink"); exit(EXIT_FAILURE); }
+    if (shm_unlink(SHM_NAME_MENU) == -1) { perror("shm_unlink"); exit(EXIT_FAILURE); }
+    if (shm_unlink(SHM_NAME_BOARD) == -1) { perror("shm_unlink"); exit(EXIT_FAILURE); }
     return 0;
 }
 
@@ -188,8 +198,12 @@ void* customerThreadFunction(void* arg) {
     Config *config = getConfigFromSHM();
     OrdersBoard *orders = getOrdersFromSHM(config);
     Menu *menu = getMenuFromSHM(config);
+    unsigned char buffer[4];
     while (get_elapsed_time(config) <= (double)(config->simulationTime)) { // until simulation time runs out
-        sleep(rand()%(MAX_SLEEP_TIME_FOR_CUSTOMER - MIN_SLEEP_TIME_FOR_CUSTOMER + 1) + MIN_SLEEP_TIME_FOR_CUSTOMER);
+        if (RAND_bytes(buffer, sizeof(buffer)) != 1) {
+            pthread_mutex_lock(&mutexError); perror("RAND_bytes fail"); exit(EXIT_FAILURE);  pthread_mutex_unlock(&mutexError);
+        }
+        sleep((buffer[0] % (MAX_SLEEP_TIME_FOR_CUSTOMER - MIN_SLEEP_TIME_FOR_CUSTOMER + 1) ) + MIN_SLEEP_TIME_FOR_CUSTOMER);
         pthread_mutex_lock(&mutexOutput);
             printf("Time: %.3f, Customer %d (TID %ld) is reading the menu.\n", get_elapsed_time(config), cust_id, syscall(SYS_gettid));
         pthread_mutex_unlock(&mutexOutput);
@@ -197,10 +211,16 @@ void* customerThreadFunction(void* arg) {
 
         if (orders[cust_id].done == 0) continue;
         // 50% probability of ordering
-        if (rand() % 2 && (get_elapsed_time(config) <= (double)(config->simulationTime))) {
+        if (RAND_bytes(buffer, sizeof(buffer)) != 1) {
+            pthread_mutex_lock(&mutexError); perror("RAND_bytes fail"); exit(EXIT_FAILURE);  pthread_mutex_unlock(&mutexError);
+        }
+        if (buffer[0] % 2 && (get_elapsed_time(config) <= (double)(config->simulationTime))) {
+            if (RAND_bytes(buffer, sizeof(buffer)) != 1) {
+                pthread_mutex_lock(&mutexError); perror("RAND_bytes fail"); exit(EXIT_FAILURE);  pthread_mutex_unlock(&mutexError);
+            }
             pthread_mutex_lock(&mutexOrders);
-                orders[cust_id].itemId = rand() % config->numItems;
-                orders[cust_id].amount = rand() % 4 + 1; // random amount 1-4
+                orders[cust_id].itemId = buffer[0] % config->numItems;
+                orders[cust_id].amount = buffer[1] % 4 + 1; // random amount 1-4
                 orders[cust_id].done = 0; // set order to not done
             pthread_mutex_unlock(&mutexOrders);
             pthread_mutex_lock(&mutexOutput);
@@ -225,9 +245,12 @@ void* waiterThreadFunction(void* arg) {
     Config *config = getConfigFromSHM();
     OrdersBoard *orders = getOrdersFromSHM(config);
     Menu *menu = getMenuFromSHM(config);
+    unsigned char buffer[4];
     while (get_elapsed_time(config) <= (double)(config->simulationTime)) { // until simulation time runs out
-        sleep(rand() % 2 + 1); // random wait 1-2 seconds
-        sleep(rand()%(MAX_SLEEP_TIME_FOR_WAITER - MIN_SLEEP_TIME_FOR_WAITER + 1) + MIN_SLEEP_TIME_FOR_WAITER);
+        if (RAND_bytes(buffer, sizeof(buffer)) != 1) {
+            pthread_mutex_lock(&mutexError); perror("RAND_bytes fail"); exit(EXIT_FAILURE);  pthread_mutex_unlock(&mutexError);
+        }
+        sleep((buffer[0] % (MAX_SLEEP_TIME_FOR_WAITER - MIN_SLEEP_TIME_FOR_WAITER + 1) ) + MIN_SLEEP_TIME_FOR_WAITER);
         pthread_mutex_lock(&mutexOrders);
             for (int j = 0; j < config->numCustomers; j++) {
                 if (orders[j].done == 0) {
@@ -266,6 +289,10 @@ void* createSharedMemory(const char* name, size_t size) {
     void* addr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (addr == MAP_FAILED) {
         perror("mmap");
+        exit(EXIT_FAILURE);
+    }
+    if (close(fd) == -1) {
+        perror("close");
         exit(EXIT_FAILURE);
     }
     return addr;
