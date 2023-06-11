@@ -20,6 +20,10 @@ const int MIN_SLEEP_TIME_FOR_WAITER = 1;
 const int MAX_SLEEP_TIME_FOR_WAITER = 2;
 const int MAX_PRICE_FOR_MENU_ITEM = 100;
 
+// States of order
+#define ORDER_DONE 1
+#define ORDER_NOT_DONE 0
+
 // Catalogs for shared memory
 #define SHM_NAME_MENU "/my_shm_menu"
 #define SHM_NAME_BOARD "/my_shm_orders_board"
@@ -117,17 +121,17 @@ int main(int argc, char *argv[]) {
         orders[i].customerId = i;
         orders[i].itemId = -1;
         orders[i].amount = 0;
-        orders[i].done = 1; // true initially
+        orders[i].done = ORDER_DONE; // true initially
     }
     // Initialize mutexes
-    int MutexInit = pthread_mutex_init(&mutexOutput, NULL);
-    if (MutexInit != 0) {fprintf(stderr, "Failed to initialize mutex: %s\n", strerror(MutexInit)); exit(EXIT_FAILURE);}
-    MutexInit = pthread_mutex_init(&mutexMenu, NULL);
-    if (MutexInit != 0) {fprintf(stderr, "Failed to initialize mutex: %s\n", strerror(MutexInit)); exit(EXIT_FAILURE);}
-    MutexInit = pthread_mutex_init(&mutexOrders, NULL);
-    if (MutexInit != 0) {fprintf(stderr, "Failed to initialize mutex: %s\n", strerror(MutexInit)); exit(EXIT_FAILURE);}
-    MutexInit = pthread_mutex_init(&mutexError, NULL);
-    if (MutexInit != 0) {fprintf(stderr, "Failed to initialize mutex: %s\n", strerror(MutexInit)); exit(EXIT_FAILURE);}
+    if (pthread_mutex_init(&mutexOutput, NULL) != 0 != 0)
+    {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
+    if (pthread_mutex_init(&mutexMenu, NULL) != 0)
+    {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
+    if (pthread_mutex_init(&mutexOrders, NULL) != 0)
+    {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
+    if (pthread_mutex_init(&mutexError, NULL)!= 0)
+    {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
     //  Save the start of simulation time
     clock_gettime(CLOCK_MONOTONIC, &config->startTime);
     // Run threads
@@ -221,7 +225,7 @@ void* customerThreadFunction(void* arg) {
             pthread_mutex_lock(&mutexOrders);
                 orders[cust_id].itemId = buffer[0] % config->numItems;
                 orders[cust_id].amount = buffer[1] % 4 + 1; // random amount 1-4
-                orders[cust_id].done = 0; // set order to not done
+                orders[cust_id].done = ORDER_NOT_DONE; // set order to not done
             pthread_mutex_unlock(&mutexOrders);
             pthread_mutex_lock(&mutexOutput);
                 printf("Time: %.3f, Customer %d (TID %ld) ordered %d of %s.\n",
@@ -253,9 +257,9 @@ void* waiterThreadFunction(void* arg) {
         sleep((buffer[0] % (MAX_SLEEP_TIME_FOR_WAITER - MIN_SLEEP_TIME_FOR_WAITER + 1) ) + MIN_SLEEP_TIME_FOR_WAITER);
         pthread_mutex_lock(&mutexOrders);
             for (int j = 0; j < config->numCustomers; j++) {
-                if (orders[j].done == 0) {
+                if (orders[j].done == ORDER_NOT_DONE) {
                     menu[orders[j].itemId].totalOrdered += orders[j].amount;
-                    orders[j].done = 1; // order is done
+                    orders[j].done = ORDER_DONE; // order is done
                     pthread_mutex_lock(&mutexOutput);
                         printf("Time: %.3f, Waiter %d (TID %ld) completed order for Customer %d.\n",
                                get_elapsed_time(config), wait_id, syscall(SYS_gettid), j);
