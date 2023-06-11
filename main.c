@@ -142,7 +142,7 @@ int main(int argc, char *argv[]) {
         orders[i].done = ORDER_DONE; // true initially
     }
     // Initialize mutexes
-    if (pthread_mutex_init(&mutexOutput, NULL) != 0 != 0)
+    if (pthread_mutex_init(&mutexOutput, NULL) != 0)
     {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
     if (pthread_mutex_init(&mutexMenu, NULL) != 0)
     {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
@@ -198,12 +198,9 @@ int main(int argc, char *argv[]) {
     printf("\nTotal number of ordered items: %d\n", totalOrders);
     printf("Total income of the restaurant: %.2f shekels\n", totalIncome);
     // Destroy mutexes
-    int mutexDestoyr = pthread_mutex_destroy(&mutexOutput);
-    if (mutexDestoyr != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(mutexDestoyr)); exit(EXIT_FAILURE);}
-    mutexDestoyr = pthread_mutex_destroy(&mutexMenu);
-    if (mutexDestoyr != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(mutexDestoyr)); exit(EXIT_FAILURE);}
-    mutexDestoyr = pthread_mutex_destroy(&mutexOrders);
-    if (mutexDestoyr != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(mutexDestoyr)); exit(EXIT_FAILURE);}
+    if (pthread_mutex_destroy(&mutexOutput) != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
+    if (pthread_mutex_destroy(&mutexMenu) != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
+    if (pthread_mutex_destroy(&mutexOrders) != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
     rwlock_destroy(&menu_rwlock);
     // Unmap shared memory
     if (munmap(config, CONFIG_SIZE) == -1) {perror("munmap"); exit(EXIT_FAILURE);}
@@ -363,14 +360,16 @@ double get_elapsed_time(Config* config) {
 
 ////Write-Read Lock Implementation with Reader priotity
 void rwlock_init(rwlock_t *rw) {
-    pthread_mutex_init(&rw->resource_mutex, NULL);
-    pthread_mutex_init(&rw->count_mutex, NULL);
+    if (pthread_mutex_init(&rw->resource_mutex, NULL) != 0)
+    {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
+    if (pthread_mutex_init(&rw->count_mutex, NULL) != 0)
+    {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
     rw->reader_count = 0;
 }
 
 void rwlock_destroy(rwlock_t *rw) {
-    pthread_mutex_destroy(&rw->resource_mutex);
-    pthread_mutex_destroy(&rw->count_mutex);
+    if (pthread_mutex_destroy(&rw->resource_mutex) != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
+    if (pthread_mutex_destroy(&rw->count_mutex) != 0) {fprintf(stderr, "Failed to destroy mutex: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
 }
 
 void rwlock_acquire_readlock(rwlock_t *rw) {
