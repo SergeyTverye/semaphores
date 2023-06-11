@@ -7,18 +7,18 @@
 #include <sys/syscall.h>
 #include <string.h>
 #include <errno.h>
-#include <openssl/rand.h>
+#include <openssl/rand.h> // for using a more random number generator
 
 // Parameters
-#define MAX_ITEMS 10
-#define MAX_CUSTOMERS 10
-#define MAX_WAITERS 3
+const int MAX_ITEMS = 10;
+const int MAX_CUSTOMERS = 10;
+const int MAX_WAITERS = 3;
 #define MAX_NAME_LEN 15
-#define MIN_SLEEP_TIME_FOR_CUSTOMER 3
-#define MAX_SLEEP_TIME_FOR_CUSTOMER 6
-#define MIN_SLEEP_TIME_FOR_WAITER 1
-#define MAX_SLEEP_TIME_FOR_WAITER 2
-#define MAX_PRICE_FOR_MENU_ITEM 100
+const int MIN_SLEEP_TIME_FOR_CUSTOMER = 3;
+const int MAX_SLEEP_TIME_FOR_CUSTOMER = 6;
+const int MIN_SLEEP_TIME_FOR_WAITER = 1;
+const int MAX_SLEEP_TIME_FOR_WAITER = 2;
+const int MAX_PRICE_FOR_MENU_ITEM = 100;
 
 // Catalogs for shared memory
 #define SHM_NAME_MENU "/my_shm_menu"
@@ -28,21 +28,21 @@
 #define ORDERS_BOARD_SIZE sizeof(OrdersBoard)
 #define CONFIG_SIZE sizeof(Config)
 
-typedef struct {
+typedef struct Menu {
     int id;
     char name[MAX_NAME_LEN];
     float price;
     int totalOrdered;
 } Menu;
 
-typedef struct {
+typedef struct OrdersBoard {
     int customerId;
     int itemId;
     int amount;
     int done; // true if no active order
 } OrdersBoard;
 
-typedef struct {
+typedef struct Config {
     int simulationTime;
     struct timespec startTime;
     int numItems;
@@ -119,7 +119,7 @@ int main(int argc, char *argv[]) {
         orders[i].amount = 0;
         orders[i].done = 1; // true initially
     }
-    // Mutex's initit
+    // Initialize mutexes
     int MutexInit = pthread_mutex_init(&mutexOutput, NULL);
     if (MutexInit != 0) {fprintf(stderr, "Failed to initialize mutex: %s\n", strerror(MutexInit)); exit(EXIT_FAILURE);}
     MutexInit = pthread_mutex_init(&mutexMenu, NULL);
