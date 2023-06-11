@@ -311,11 +311,11 @@ void* createSharedMemory(const char* name, size_t size) {
         perror("shm_open");
         exit(EXIT_FAILURE);
     }
-    if (ftruncate(fd, size) == -1) {
+    if (ftruncate(fd, size) == -1) { //set size for shared memory
         perror("ftruncate");
         exit(EXIT_FAILURE);
     }
-    void* addr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    void* addr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0); // make link to shared memory in process memory
     if (addr == MAP_FAILED) {
         perror("mmap");
         exit(EXIT_FAILURE);
@@ -358,7 +358,7 @@ double get_elapsed_time(Config* config) {
            (current_time.tv_nsec - config->startTime.tv_nsec) / 1e9;
 }
 
-////Write-Read Lock Implementation with Reader priotity
+////Write-Read Lock Implementation with Reader priority
 void rwlock_init(rwlock_t *rw) {
     if (pthread_mutex_init(&rw->resource_mutex, NULL) != 0)
     {fprintf(stderr, "Failed to initialize mutexOutput: %s\n", strerror(errno)); exit(EXIT_FAILURE);}
@@ -373,9 +373,9 @@ void rwlock_destroy(rwlock_t *rw) {
 }
 
 void rwlock_acquire_readlock(rwlock_t *rw) {
-    pthread_mutex_lock(&rw->count_mutex);
-    rw->reader_count++;
-    if (rw->reader_count == 1) {
+    pthread_mutex_lock(&rw->count_mutex); // Lock the mutex of the readers counter
+    rw->reader_count++; //
+    if (rw->reader_count == 1) { // If it's the first reader lock the resource mutex
         pthread_mutex_lock(&rw->resource_mutex);
     }
     pthread_mutex_unlock(&rw->count_mutex);
